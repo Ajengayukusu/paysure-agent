@@ -8,6 +8,8 @@ end-to-end tUSD8 payment flow on the Aevum testnet (chain **44005**).
 🔴 **Live demo (reads chain 44005 in your browser, no wallet needed):**
 https://ajengayukusu.github.io/paysure-agent/
 
+🎥 **Demo video (2:32):** https://www.youtube.com/watch?v=w3RB_iAIHEs
+
 ---
 
 ## The problem
@@ -101,6 +103,8 @@ are the proof, per the starter-kit docs.)
 | tUSD8 (QDay) | [`0x456569838f1d43009A91ebA4263147Afd7233483`](https://explorer-test.qday.info/address/0x456569838f1d43009A91ebA4263147Afd7233483) |
 
 ## Evidence — every flow is live on-chain
+
+🎥 **Demo video:** [PaySure Agent — Agent Invoice Payments on Aevum (QDay Testnet)](https://www.youtube.com/watch?v=w3RB_iAIHEs) (2:32) — a live recording of the demo page walking through the on-chain evidence below.
 
 | Step | Result | Transaction |
 |---|---|---|
