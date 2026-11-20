@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaySure Agent — agent invoice payments on Aevum (QDay testnet)</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <h1>PaySure Agent</h1>
+    <p class="sub">Agent invoice payments on Aevum (QDay testnet) — every value below is read live from chain 44005.</p>
+    <div class="chain-status" id="chain-status">
+      <span class="dot dot-wait" id="chain-dot"></span>
+      <span id="chain-text">Connecting to Aevum…</span>
+      <button id="refresh-btn" type="button">Refresh</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <p class="notice" id="global-error" hidden></p>
+
+  <section class="card">
+    <h2>1 · Confirmation of Payee</h2>
+    <p class="hint">Type a payee name. The demo looks it up in the on-chain PayeeRegistry before any payment could be made.</p>
+    <div class="row">
+      <input id="payee-input" type="text" value="Sari Bakery" aria-label="Payee name">
+      <button id="payee-btn" type="button">Look up</button>
+    </div>
+    <div id="payee-result" class="result">Loading registry…</div>
+    <p class="addr-line">Registry contract:
+      <a id="registry-link" target="_blank" rel="noopener">PayeeRegistry</a></p>
+  </section>
+
+  <section class="card">
+    <h2>2 · Invoices</h2>
+    <div id="invoices" class="grid"><p class="loading">Loading invoices from chain…</p></div>
+    <p class="addr-line">Contract:
+      <a id="invoice-link" target="_blank" rel="noopener">AgentInvoicePay</a></p>
+  </section>
+
+  <section class="card">
+    <h2>3 · Agent session</h2>
+    <div id="session"><p class="loading">Loading session from chain…</p></div>
+  </section>
+
+  <section class="card">
+    <h2>4 · Balances</h2>
+    <div id="balances"><p class="loading">Loading balances from chain…</p></div>
+  </section>
+
+  <section class="card">
+    <h2>5 · Receipts — live payment watcher</h2>
+    <p class="hint">Paid events scanned from the deploy block in chunks of at most 1,000 blocks, deduplicated by transaction + log index. “Finalized” means the payment block is at or below the chain’s finalized block.</p>
+    <div id="receipts"><p class="loading">Scanning Paid events…</p></div>
+  </section>
+
+  <footer>
+    <p>PaySure Agent · Aevum Builder Challenge #1 · Testnet only — tUSD8 has no real value.</p>
+  </footer>
+</main>
+
+<script src="rpc-core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
