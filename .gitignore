@@ -1,0 +1,20 @@
+# Foundry build artifacts
+cache/
+out/
+broadcast/
+
+# Dependencies — not vendored. Install the pinned versions (see README):
+#   forge install foundry-rs/forge-std@v1.9.6
+#   forge install OpenZeppelin/openzeppelin-contracts@v5.1.0
+lib/
+node_modules/
+
+# Generated watcher output — regenerate with: node scripts/watch-receipts.mjs
+scripts/receipts.json
+
+# Local secrets / env — NEVER commit keys. Live scripts read test-wallet
+# keys at runtime from ~/workspace/aevum-challenge/.wallet/ (outside this repo).
+.env
+.env.*
+*.key
+.wallet/
