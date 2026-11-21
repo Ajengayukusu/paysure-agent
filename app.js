@@ -422,42 +422,51 @@
     });
   }
 
+  var NO_WALLET_HINT = '<p class="kv">No Web3 wallet detected in this browser. Install a wallet such as ' +
+    '<a href="https://metamask.io" target="_blank" rel="noopener">MetaMask</a> to write on-chain from this page — ' +
+    "all the live reads above keep working without one.</p>";
+
+  // The panel ALWAYS renders every control — Connect, register, create
+  // invoice and the pay area — in every state. Without a connected wallet
+  // the write controls are visible but disabled; only the hint text and
+  // the Connect button's behaviour change with the wallet state.
   function renderWallet() {
     var area = $("wallet-area");
-    if (!provider()) {
-      area.innerHTML = '<p class="kv">No Web3 wallet detected in this browser. Install a wallet such as ' +
-        '<a href="https://metamask.io" target="_blank" rel="noopener">MetaMask</a> to write on-chain from this page — ' +
-        "all the live reads above keep working without one.</p>";
-      return;
-    }
-    if (!state.wallet) {
-      area.innerHTML = '<p class="kv">Connect your wallet to register a payee name, create an invoice, or pay one.</p>' +
-        '<button id="connect-btn" type="button">Connect wallet</button>' +
-        '<div id="wallet-msg" class="result"></div>';
-      $("connect-btn").addEventListener("click", connectWallet);
-      return;
+    var hasWallet = !!provider();
+    var connected = !!state.wallet;
+    var dis = connected ? "" : " disabled";
+    var status;
+    if (!hasWallet) {
+      status = NO_WALLET_HINT;
+    } else if (!connected) {
+      status = '<p class="kv">Connect your wallet to register a payee name, create an invoice, or pay one.</p>';
+    } else {
+      status = '<p class="kv">Connected: <span class="mono">' + esc(state.wallet) + "</span> " +
+        '<span id="wallet-chain"></span></p>';
     }
     area.innerHTML =
-      '<p class="kv">Connected: <span class="mono">' + esc(state.wallet) + "</span> " +
-      '<span id="wallet-chain"></span></p>' +
+      status +
+      '<button id="connect-btn" type="button">Connect wallet</button>' +
       '<div id="wallet-msg" class="result"></div>' +
       '<h3 class="sub-h">Register your payee name</h3>' +
       '<p class="hint">Registers the name for <b>your connected address</b> in the Confirmation of Payee registry — the same self-registration “' +
       esc(CONFIG.payeeName) + '” used. A registered name can never be taken over by someone else.</p>' +
-      '<div class="row"><input id="reg-name" type="text" placeholder="Your payee name, e.g. Sari Bakery" aria-label="Payee name to register">' +
-      '<button id="reg-btn" type="button">Register name</button></div>' +
+      '<div class="row"><input id="reg-name" type="text" placeholder="Your payee name, e.g. Sari Bakery" aria-label="Payee name to register"' + dis + '>' +
+      '<button id="reg-btn" type="button"' + dis + '>Register name</button></div>' +
       '<div id="reg-result" class="result"></div>' +
       '<h3 class="sub-h">Create an invoice (merchant)</h3>' +
       '<p class="hint">Any wallet can act as merchant: the invoice names a <b>registered</b> payee and an exact amount. The session agent can then pay it.</p>' +
-      '<div class="row"><input id="ci-name" type="text" value="' + esc(CONFIG.payeeName) + '" aria-label="Invoice payee name">' +
-      '<input id="ci-amount" type="text" inputmode="decimal" value="0.10" aria-label="Invoice amount in tUSD8" class="short">' +
-      '<input id="ci-days" type="text" inputmode="numeric" value="7" aria-label="Expiry in days" class="short">' +
-      '<button id="ci-btn" type="button">Create invoice</button></div>' +
+      '<div class="row"><input id="ci-name" type="text" value="' + esc(CONFIG.payeeName) + '" aria-label="Invoice payee name"' + dis + '>' +
+      '<input id="ci-amount" type="text" inputmode="decimal" value="0.10" aria-label="Invoice amount in tUSD8" class="short"' + dis + '>' +
+      '<input id="ci-days" type="text" inputmode="numeric" value="7" aria-label="Expiry in days" class="short"' + dis + '>' +
+      '<button id="ci-btn" type="button"' + dis + '>Create invoice</button></div>' +
       '<div id="ci-result" class="result"></div>' +
       '<h3 class="sub-h">Pay an invoice (agent session)</h3>' +
-      '<div id="pay-list"><p class="loading">Checking your session…</p></div>';
+      '<div id="pay-list">' + (connected ? '<p class="loading">Checking your session…</p>' : "") + "</div>";
+    $("connect-btn").addEventListener("click", connectWallet);
     $("reg-btn").addEventListener("click", onRegister);
     $("ci-btn").addEventListener("click", onCreateInvoice);
+    if (!connected) { renderPayPanel(); return; }
     prequest("eth_chainId", []).then(function (id) {
       var ok = parseInt(id, 16) === CONFIG.chainId;
       $("wallet-chain").innerHTML = ok
@@ -488,6 +497,10 @@
 
   function connectWallet() {
     var msg = $("wallet-msg");
+    if (!provider()) {
+      if (msg) msg.innerHTML = NO_WALLET_HINT;
+      return;
+    }
     prequest("eth_requestAccounts", []).then(function (accounts) {
       if (!accounts || !accounts.length) throw new Error("No account returned by the wallet.");
       state.wallet = accounts[0];
@@ -556,13 +569,12 @@
   function renderPayPanel() {
     var box = $("pay-list");
     if (!box) return;
-    if (!state.wallet) {
-      box.innerHTML = '<p class="kv">Connect a wallet above to see whether it can pay.</p>';
-      return;
-    }
     var unpaid = state.invoices.filter(function (x) { return x.v === "v2" && !x.receipt.paid; });
     var html = "";
-    if (!state.walletCanPay) {
+    if (!state.wallet) {
+      html += '<p class="kv">Connect a wallet above to pay. ' +
+        "Roles in one line: the <b>payee</b> registers its name · any <b>merchant</b> creates invoices · only the wallet the <b>owner</b> granted a session to (the agent) can pay them, inside its caps.</p>";
+    } else if (!state.walletCanPay) {
       html += '<p class="kv">Your connected wallet holds <b>no active agent session</b> on the v2 contract, so Pay stays disabled. ' +
         "Roles in one line: the <b>payee</b> registers its name · any <b>merchant</b> creates invoices · only the wallet the <b>owner</b> granted a session to (the agent) can pay them, inside its caps.</p>";
     }
