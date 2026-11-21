@@ -9,7 +9,7 @@ end-to-end tUSD8 payment flow on the Aevum testnet (chain **44005**).
 writes on-chain through your own wallet):**
 https://ajengayukusu.github.io/paysure-agent/
 
-🎥 **Demo video (2:32):** https://www.youtube.com/watch?v=w3RB_iAIHEs
+🎥 **Demo video (2:52):** https://www.youtube.com/watch?v=r6h-JCOpXXs
 
 ---
 
@@ -148,7 +148,7 @@ Final v2 state, read back on-chain: `spentToPayeeToday(agent, payee)` = **1.50 t
 
 ## Evidence — v1 (20 Nov 2026, superseded contract)
 
-🎥 **Demo video:** [PaySure Agent — Agent Invoice Payments on Aevum (QDay Testnet)](https://www.youtube.com/watch?v=w3RB_iAIHEs) (2:32) — a live recording of the demo page walking through the on-chain evidence below.
+🎥 **Demo video (v1):** [PaySure Agent — Agent Invoice Payments on Aevum (QDay Testnet)](https://www.youtube.com/watch?v=w3RB_iAIHEs) (2:32) — a live recording of the v1 demo page walking through the on-chain evidence below.
 
 | Step | Result | Transaction |
 |---|---|---|
