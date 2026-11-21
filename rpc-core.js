@@ -82,12 +82,12 @@
   function wordFromBigInt(v) { return v.toString(16).padStart(64, "0"); }
   function wordFromAddress(addr) { return "0".repeat(24) + addr.toLowerCase().replace(/^0x/, ""); }
   function encodeCall(sig, args) {
-    // args: array of {type, value}; supports address, bytes32, uint256, string
+    // args: array of {type, value}; supports address, bytes32, uint256, uint64, string
     var head = "", tail = "", headBytes = args.length * 32;
     args.forEach(function (a) {
       if (a.type === "address") head += wordFromAddress(a.value);
       else if (a.type === "bytes32") head += a.value.toLowerCase().replace(/^0x/, "").padStart(64, "0");
-      else if (a.type === "uint256") head += wordFromBigInt(BigInt(a.value));
+      else if (a.type === "uint256" || a.type === "uint64") head += wordFromBigInt(BigInt(a.value));
       else if (a.type === "string") {
         head += wordFromBigInt(BigInt(headBytes + tail.length / 2));
         var b = utf8Bytes(a.value);
@@ -128,6 +128,16 @@
     return whole.toString() + "." + frac;
   }
   function fmtTUSD8(raw) { return fmtUnits(raw, 6, 2); }
+  // Parse a human decimal string ("1.25") into base units (1250000n at 6 dp).
+  // String-only math — no floats, so no rounding surprises. Throws on junk.
+  function parseUnits(str, decimals) {
+    var s = String(str).trim();
+    if (!/^\d+(\.\d+)?$/.test(s)) throw new Error("not a valid amount: " + str);
+    var parts = s.split("."), whole = parts[0], frac = parts[1] || "";
+    if (frac.length > decimals) throw new Error("too many decimal places (max " + decimals + ")");
+    frac = frac.padEnd(decimals, "0");
+    return BigInt(whole) * (10n ** BigInt(decimals)) + BigInt(frac || "0");
+  }
   function fmtTQDAY(wei) { return fmtUnits(wei, 18, 4); }
   function fmtTime(unixSeconds) {
     var n = Number(unixSeconds);
@@ -141,7 +151,7 @@
     keccak256: keccak256, bytesToHex: bytesToHex, utf8Bytes: utf8Bytes, selector: selector,
     encodeCall: encodeCall, words: words, wordToBigInt: wordToBigInt,
     wordToAddress: wordToAddress, wordToBool: wordToBool, decodeStringAt: decodeStringAt,
-    fmtUnits: fmtUnits, fmtTUSD8: fmtTUSD8, fmtTQDAY: fmtTQDAY, fmtTime: fmtTime,
+    fmtUnits: fmtUnits, fmtTUSD8: fmtTUSD8, fmtTQDAY: fmtTQDAY, fmtTime: fmtTime, parseUnits: parseUnits,
     shortAddr: shortAddr, hexToNum: hexToNum
   };
   global.PaySureCore = api;
