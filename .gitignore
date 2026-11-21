@@ -12,6 +12,9 @@ node_modules/
 # Generated watcher output — regenerate with: node scripts/watch-receipts.mjs
 scripts/receipts.json
 
+# Local v2 deploy-run state (public address/tx only, but a local artifact)
+scripts/.v2-deploy-state.json
+
 # Local secrets / env — NEVER commit keys. Live scripts read test-wallet
 # keys at runtime from ~/workspace/aevum-challenge/.wallet/ (outside this repo).
 .env

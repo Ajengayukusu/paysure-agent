@@ -55,6 +55,12 @@ th { color: #5a6a61; font-weight: 600; width: 34%; }
 .badge-seen { background: #eef1ee; color: #40534a; border: 1px solid #c3cec7; }
 .badge-final { background: #e2f4e9; color: #0d5c36; border: 1px solid #9fd4b4; }
 .warn { background: #fdf6e3; border: 1px solid #ecd28f; border-radius: 6px; padding: 8px 10px; font-size: 13.5px; margin-top: 10px; }
+.ok { color: #0d5c36; font-weight: 600; }
+.sub-h { font-size: 15.5px; margin: 20px 0 4px; }
+input.short { flex: 0 1 110px; }
+input[type="text"].short { flex: 0 1 110px; }
+button:disabled { background: #e8edea; color: #84948a; border-color: #c3cec7; cursor: not-allowed; }
+#wallet-area .result { margin-top: 8px; }
 .notice { background: #fdeceb; border: 1px solid #f0b3ae; color: #7a1f1a; border-radius: 8px; padding: 10px 14px; }
 .loading { color: #5a6a61; }
 .err { color: #b3261e; }

@@ -41,9 +41,16 @@ contract AgentInvoicePayTest is Test {
         registry.register("Bob Payee", payee2);
 
         vm.startPrank(payer);
-        pay.grantSession(agent, PER_TX_CAP, DAILY_CAP, uint64(block.timestamp + 7 days));
+        // Per-payee cap 0 = disabled: the base session exercises the v1 rules unchanged.
+        pay.grantSession(agent, PER_TX_CAP, DAILY_CAP, 0, uint64(block.timestamp + 7 days));
         pay.setPayeeAllowed(agent, payee, true);
         vm.stopPrank();
+    }
+
+    /// @dev Re-grant the agent session with a per-payee cap (v2), same other limits.
+    function _grantWithPerPayeeCap(uint256 perPayeeCap) internal {
+        vm.prank(payer);
+        pay.grantSession(agent, PER_TX_CAP, DAILY_CAP, perPayeeCap, uint64(block.timestamp + 7 days));
     }
 
     function _create(bytes32 id, uint256 amount) internal {
@@ -289,6 +296,128 @@ contract AgentInvoicePayTest is Test {
         vm.prank(agent);
         vm.expectRevert(abi.encodeWithSelector(AgentInvoicePay.AmountMismatch.selector, 50e6, 49e6));
         pay.payInvoiceWithAuthorization(id, 49e6, 0, deadline, v, r, s);
+    }
+
+    // ------------------------------------------------------------ per-payee cap (v2)
+
+    function test_perPayeeCap_sessionExposesCap() public {
+        _grantWithPerPayeeCap(100e6);
+        assertEq(pay.sessionOf(agent).perPayeeCap, 100e6);
+    }
+
+    function test_perPayeeCap_payUnderCap_succeeds() public {
+        _grantWithPerPayeeCap(100e6);
+        bytes32 id1 = keccak256("inv-pp-1");
+        bytes32 id2 = keccak256("inv-pp-2");
+        _create(id1, 60e6);
+        _create(id2, 40e6);
+        vm.prank(agent);
+        pay.payInvoice(id1, 60e6);
+        vm.prank(agent);
+        pay.payInvoice(id2, 40e6); // cumulative 100e6 == cap exactly: allowed
+        assertTrue(pay.isPaid(id1));
+        assertTrue(pay.isPaid(id2));
+        assertEq(token.balanceOf(payee), 100e6);
+        assertEq(pay.spentToPayeeToday(agent, payee), 100e6);
+    }
+
+    function test_perPayeeCap_cumulativeCrossing_reverts() public {
+        _grantWithPerPayeeCap(100e6);
+        bytes32 id1 = keccak256("inv-pp-cross-1");
+        bytes32 id2 = keccak256("inv-pp-cross-2");
+        _create(id1, 60e6);
+        _create(id2, 50e6);
+        vm.prank(agent);
+        pay.payInvoice(id1, 60e6);
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(AgentInvoicePay.PerPayeeCapExceeded.selector, 50e6, 60e6, 100e6)
+        );
+        pay.payInvoice(id2, 50e6);
+        assertFalse(pay.isPaid(id2));
+        assertEq(token.balanceOf(payee), 60e6);
+        assertEq(pay.spentToPayeeToday(agent, payee), 60e6);
+    }
+
+    function test_perPayeeCap_differentPayeeUnaffected() public {
+        _grantWithPerPayeeCap(100e6);
+        vm.prank(payer);
+        pay.setPayeeAllowed(agent, payee2, true);
+        bytes32 id1 = keccak256("inv-pp-other-1");
+        bytes32 id2 = keccak256("inv-pp-other-2");
+        _create(id1, 100e6); // Alice: exactly at her per-payee cap
+        _create(id2, "Bob Payee", payee2, 50e6, uint64(block.timestamp + 30 days));
+        vm.prank(agent);
+        pay.payInvoice(id1, 100e6);
+        vm.prank(agent);
+        pay.payInvoice(id2, 50e6); // Bob has his own per-payee budget
+        assertTrue(pay.isPaid(id2));
+        assertEq(token.balanceOf(payee2), 50e6);
+        assertEq(pay.spentToPayeeToday(agent, payee), 100e6);
+        assertEq(pay.spentToPayeeToday(agent, payee2), 50e6);
+    }
+
+    function test_perPayeeCap_resetsNextDay() public {
+        _grantWithPerPayeeCap(100e6);
+        bytes32 id1 = keccak256("inv-pp-day-1");
+        bytes32 id2 = keccak256("inv-pp-day-2");
+        _create(id1, 100e6);
+        _create(id2, 100e6);
+        vm.prank(agent);
+        pay.payInvoice(id1, 100e6);
+        assertEq(pay.spentToPayeeToday(agent, payee), 100e6);
+
+        vm.warp(block.timestamp + 1 days + 1); // next UTC-day window
+        assertEq(pay.spentToPayeeToday(agent, payee), 0);
+        vm.prank(agent);
+        pay.payInvoice(id2, 100e6);
+        assertTrue(pay.isPaid(id2));
+        assertEq(pay.spentToPayeeToday(agent, payee), 100e6);
+        assertEq(token.balanceOf(payee), 200e6);
+    }
+
+    function test_perPayeeCap_gaslessPathEnforced() public {
+        _grantWithPerPayeeCap(100e6);
+        bytes32 id1 = keccak256("inv-pp-gas-1");
+        bytes32 id2 = keccak256("inv-pp-gas-2");
+        _create(id1, 60e6);
+        _create(id2, 50e6);
+        vm.prank(agent);
+        pay.payInvoice(id1, 60e6);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        (uint8 v, bytes32 r, bytes32 s) = _signFor(id2, 50e6, deadline);
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(AgentInvoicePay.PerPayeeCapExceeded.selector, 50e6, 60e6, 100e6)
+        );
+        pay.payInvoiceWithAuthorization(id2, 50e6, 0, deadline, v, r, s);
+        assertFalse(pay.isPaid(id2));
+
+        // And a gasless payment that fits under the cap succeeds on the same path.
+        bytes32 id3 = keccak256("inv-pp-gas-3");
+        _create(id3, 40e6);
+        (uint8 v3, bytes32 r3, bytes32 s3) = _signFor(id3, 40e6, deadline);
+        vm.prank(agent);
+        pay.payInvoiceWithAuthorization(id3, 40e6, 0, deadline, v3, r3, s3);
+        assertTrue(pay.isPaid(id3));
+        assertEq(pay.spentToPayeeToday(agent, payee), 100e6);
+    }
+
+    function test_perPayeeCap_zero_meansDisabled() public {
+        // Base session has per-payee cap 0: only per-tx (200) and daily (300) bind.
+        bytes32 id1 = keccak256("inv-pp-off-1");
+        bytes32 id2 = keccak256("inv-pp-off-2");
+        _create(id1, 200e6);
+        _create(id2, 100e6);
+        vm.prank(agent);
+        pay.payInvoice(id1, 200e6);
+        vm.prank(agent);
+        pay.payInvoice(id2, 100e6); // 300e6 to ONE payee in a day: fine with cap disabled
+        assertTrue(pay.isPaid(id2));
+        assertEq(pay.sessionOf(agent).perPayeeCap, 0);
+        // The getter still tracks the running total even while the cap is disabled.
+        assertEq(pay.spentToPayeeToday(agent, payee), 300e6);
     }
 
     // ------------------------------------------------------------ refunds

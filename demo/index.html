@@ -53,8 +53,14 @@
 
   <section class="card">
     <h2>5 · Receipts — live payment watcher</h2>
-    <p class="hint">Paid events scanned from the deploy block in chunks of at most 1,000 blocks, deduplicated by transaction + log index. “Finalized” means the payment block is at or below the chain’s finalized block.</p>
+    <p class="hint">Paid events scanned from each contract’s deploy block (v1 and v2, merged) in chunks of at most 1,000 blocks, deduplicated by contract + transaction + log index. “Finalized” means the payment block is at or below the chain’s finalized block.</p>
     <div id="receipts"><p class="loading">Scanning Paid events…</p></div>
+  </section>
+
+  <section class="card">
+    <h2>6 · Try it live — write on-chain with your own wallet</h2>
+    <p class="hint">Everything above is read-only and needs no wallet. This panel writes on-chain through <b>your</b> Web3 wallet (EIP-1193, e.g. MetaMask): the page builds the calldata locally and your wallet signs — this page never holds any key. Roles in one line: the <b>payee</b> registers its name · any <b>merchant</b> creates invoices · only the wallet holding the owner’s <b>agent session</b> can pay them, inside its caps.</p>
+    <div id="wallet-area"><p class="loading">Checking for a wallet…</p></div>
   </section>
 
   <footer>

@@ -60,7 +60,8 @@ contract AevumForkTest is Test {
         assertFalse(pay.isPaid(ORDER_ID));
 
         // 3. Owner grants the agent a capped session and allowlists the payee.
-        pay.grantSession(agent, 2e6, 3e6, uint64(block.timestamp + 7 days));
+        //    v2 session: per-tx 2, daily 3, per-payee 1.5 tUSD8/day.
+        pay.grantSession(agent, 2e6, 3e6, 1.5e6, uint64(block.timestamp + 7 days));
         pay.setPayeeAllowed(agent, payee, true);
         assertTrue(pay.payeeAllowed(agent, payee));
 
@@ -76,6 +77,8 @@ contract AevumForkTest is Test {
         assertEq(TUSD8.balanceOf(payee), payeeBefore + AMOUNT);
         assertEq(TUSD8.balanceOf(address(this)), ownerBefore - AMOUNT);
         assertTrue(pay.isPaid(ORDER_ID));
+        // v2 per-payee tracking works against the real token too.
+        assertEq(pay.spentToPayeeToday(agent, payee), AMOUNT);
 
         AgentInvoicePay.Receipt memory rc = pay.receiptOf(ORDER_ID);
         assertTrue(rc.paid);
@@ -92,7 +95,7 @@ contract AevumForkTest is Test {
 
         bytes32 bigOrder = keccak256("fork-invoice-big");
         pay.createInvoice(bigOrder, PAYEE_NAME, payee, 2.5e6, uint64(block.timestamp + 7 days));
-        pay.grantSession(agent, 2e6, 3e6, uint64(block.timestamp + 7 days));
+        pay.grantSession(agent, 2e6, 3e6, 0, uint64(block.timestamp + 7 days));
         pay.setPayeeAllowed(agent, payee, true);
         TUSD8.approve(address(pay), 2.5e6);
 

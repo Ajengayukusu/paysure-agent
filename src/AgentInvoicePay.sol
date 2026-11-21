@@ -24,10 +24,14 @@ interface IERC3009 {
 
 /// @title AgentInvoicePay — session-capped agent invoice payments in tUSD8.
 /// @notice One flow: a merchant creates an invoice for a registered payee name; the account
-///         owner grants an AI agent a *session* (per-tx cap, daily cap, expiry, payee
-///         allowlist, instantly revocable); the agent pays invoices out of the owner's
-///         balance — by approve+transferFrom, or gaslessly by relaying the owner's
-///         EIP-3009 signature. The contract enforces everything; the UI cannot widen it.
+///         owner grants an AI agent a *session* (per-tx cap, daily cap, per-payee cap,
+///         expiry, payee allowlist, instantly revocable); the agent pays invoices out of
+///         the owner's balance — by approve+transferFrom, or gaslessly by relaying the
+///         owner's EIP-3009 signature. The contract enforces everything; the UI cannot
+///         widen it.
+/// @dev v2 (21 Nov 2026): sessions gained a per-payee cap — the maximum total a session
+///      may pay to ONE payee inside the same UTC-day window as the daily cap. A
+///      per-payee cap of 0 disables that check (the per-tx and daily caps still apply).
 /// @dev Deliberate fix vs the starter kit's Checkout: Checkout never checks the amount, so
 ///      `pay(orderId, 1)` marks an order paid for 0.000001 tUSD8 (the kit docs warn about
 ///      this). Here the paid amount MUST equal the invoice's exact amount, on both paths.
@@ -60,6 +64,12 @@ contract AgentInvoicePay is Ownable {
         bool revoked;
         uint256 dayIndex; // block.timestamp / 1 days at last spend
         uint256 spentInDay;
+        uint256 perPayeeCap; // v2: max total to one payee per UTC day; 0 = disabled
+    }
+
+    struct PayeeDaySpend {
+        uint256 dayIndex; // block.timestamp / 1 days at last spend to this payee
+        uint256 spent;
     }
 
     struct Refund {
@@ -77,12 +87,13 @@ contract AgentInvoicePay is Ownable {
     mapping(bytes32 orderId => Refund) private _refunds;
     mapping(address agent => Session) private _sessions;
     mapping(address agent => mapping(address payee => bool)) private _payeeAllowed;
+    mapping(address agent => mapping(address payee => PayeeDaySpend)) private _spentPerPayee;
 
     event InvoiceCreated(
         bytes32 indexed orderId, address indexed merchant, address indexed payee, string payeeName, uint256 amount, uint64 expiry
     );
     event Paid(bytes32 indexed orderId, address indexed payer, address indexed agent, address payee, uint256 amount);
-    event SessionGranted(address indexed agent, uint256 perTxCap, uint256 dailyCap, uint64 expiresAt);
+    event SessionGranted(address indexed agent, uint256 perTxCap, uint256 dailyCap, uint256 perPayeeCap, uint64 expiresAt);
     event SessionRevoked(address indexed agent);
     event PayeeAllowanceSet(address indexed agent, address indexed payee, bool allowed);
     event RefundRecorded(bytes32 indexed orderId, address indexed merchant, uint256 amount, bytes32 ref);
@@ -103,6 +114,7 @@ contract AgentInvoicePay is Ownable {
     error SessionExpired(address agent);
     error PerTxCapExceeded(uint256 amount, uint256 cap);
     error DailyCapExceeded(uint256 amount, uint256 spentToday, uint256 cap);
+    error PerPayeeCapExceeded(uint256 amount, uint256 spentToPayeeToday, uint256 cap);
     error PayeeNotAllowed(address agent, address payee);
     error NotInvoiceMerchant(bytes32 orderId);
 
@@ -134,7 +146,12 @@ contract AgentInvoicePay is Ownable {
     // ---------------------------------------------------------------- sessions
 
     /// @notice Grant (or re-grant) an agent session. Only the account owner.
-    function grantSession(address agent, uint256 perTxCap, uint256 dailyCap, uint64 expiresAt) external onlyOwner {
+    /// @param perPayeeCap Max total this session may pay to ONE payee per UTC day
+    ///        (same day window as `dailyCap`). 0 disables the per-payee check.
+    function grantSession(address agent, uint256 perTxCap, uint256 dailyCap, uint256 perPayeeCap, uint64 expiresAt)
+        external
+        onlyOwner
+    {
         if (agent == address(0)) revert ZeroAddress();
         if (perTxCap == 0 || dailyCap < perTxCap) revert InvalidAmount();
         if (expiresAt <= block.timestamp) revert InvalidExpiry();
@@ -145,9 +162,10 @@ contract AgentInvoicePay is Ownable {
             granted: true,
             revoked: false,
             dayIndex: block.timestamp / 1 days,
-            spentInDay: 0
+            spentInDay: 0,
+            perPayeeCap: perPayeeCap
         });
-        emit SessionGranted(agent, perTxCap, dailyCap, expiresAt);
+        emit SessionGranted(agent, perTxCap, dailyCap, perPayeeCap, expiresAt);
     }
 
     /// @notice Revoke a session instantly. The agent cannot pay from the next block on.
@@ -242,6 +260,12 @@ contract AgentInvoicePay is Ownable {
         return _payeeAllowed[agent][payee];
     }
 
+    /// @notice Total `agent`'s session has paid to `payee` in the current UTC-day
+    ///         window — the running total the per-payee cap is checked against.
+    function spentToPayeeToday(address agent, address payee) external view returns (uint256) {
+        return _spentToPayeeToday(agent, payee);
+    }
+
     // ---------------------------------------------------------------- internals
 
     function _requireRegistryMatch(string memory payeeName, address payee) internal view {
@@ -271,6 +295,17 @@ contract AgentInvoicePay is Ownable {
         if (amount > s.perTxCap) revert PerTxCapExceeded(amount, s.perTxCap);
         uint256 spentToday = (block.timestamp / 1 days == s.dayIndex) ? s.spentInDay : 0;
         if (spentToday + amount > s.dailyCap) revert DailyCapExceeded(amount, spentToday, s.dailyCap);
+        if (s.perPayeeCap != 0) {
+            uint256 toPayeeToday = _spentToPayeeToday(agent, inv.payee);
+            if (toPayeeToday + amount > s.perPayeeCap) {
+                revert PerPayeeCapExceeded(amount, toPayeeToday, s.perPayeeCap);
+            }
+        }
+    }
+
+    function _spentToPayeeToday(address agent, address payee) internal view returns (uint256) {
+        PayeeDaySpend storage ps = _spentPerPayee[agent][payee];
+        return (block.timestamp / 1 days == ps.dayIndex) ? ps.spent : 0;
     }
 
     function _recordPayment(bytes32 orderId, Invoice storage inv, address agent) internal {
@@ -281,6 +316,12 @@ contract AgentInvoicePay is Ownable {
             s.spentInDay = 0;
         }
         s.spentInDay += inv.amount;
+        PayeeDaySpend storage ps = _spentPerPayee[agent][inv.payee];
+        if (today != ps.dayIndex) {
+            ps.dayIndex = today;
+            ps.spent = 0;
+        }
+        ps.spent += inv.amount;
         _receipts[orderId] = Receipt({
             payer: owner(),
             agent: agent,
