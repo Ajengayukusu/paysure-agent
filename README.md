@@ -9,7 +9,7 @@ end-to-end tUSD8 payment flow on the Aevum testnet (chain **44005**).
 writes on-chain through your own wallet):**
 https://ajengayukusu.github.io/paysure-agent/
 
-🎥 **Demo video (2:52):** https://www.youtube.com/watch?v=r6h-JCOpXXs
+🎥 **Demo video (2:46):** https://www.youtube.com/watch?v=DI32ZnA-iVk
 
 ---
 
