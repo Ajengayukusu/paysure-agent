@@ -273,7 +273,12 @@
 
   // ---- Watcher: Paid events from BOTH contracts (v1 + v2), chunked ≤1000
   // ---- blocks, dedupe per contract+tx+logIndex, merged, Seen/Finalized -----
-  function scanPayments() {
+  // NOTE (25 Nov 2026): the RPC caps eth_getLogs at 1,000 blocks per call,
+  // so a full scan is ~700 chunk calls. They used to run SEQUENTIALLY
+  // (~1 s each = 10+ min stuck on "Scanning Paid events…"). They now run
+  // with 8 in flight at once, with progress shown, so receipts appear in ~1 min.
+  var SCAN_CONCURRENCY = 8;
+  function scanPayments(onProgress) {
     var targets = [
       { v: "v1", address: CONFIG.invoicePayV1, from: CONFIG.deployBlockV1 },
       { v: "v2", address: CONFIG.invoicePay, from: CONFIG.deployBlock }
@@ -287,32 +292,41 @@
         from = to + 1;
       }
     });
-    var seen = {}, payments = [];
-    var chain = Promise.resolve();
-    jobs.forEach(function (job) {
-      chain = chain.then(function () {
-        return rpc("eth_getLogs", [{
-          address: job.address, topics: [CONFIG.paidTopic],
-          fromBlock: "0x" + job.from.toString(16), toBlock: "0x" + job.to.toString(16)
-        }]).then(function (logs) {
-          logs.forEach(function (log) {
-            var key = job.address + ":" + log.transactionHash + ":" + C.hexToNum(log.logIndex);
-            if (seen[key]) return; seen[key] = true;
-            var dw = C.words(log.data);
-            var amount = C.wordToBigInt(dw[1]);
-            if (amount === 0n) return; // zero-value events are not payments
-            payments.push({
-              v: job.v,
-              orderId: log.topics[1], payer: C.wordToAddress(log.topics[2]),
-              agent: C.wordToAddress(log.topics[3]), payee: C.wordToAddress(dw[0]),
-              amount: amount, txHash: log.transactionHash,
-              block: C.hexToNum(log.blockNumber), logIndex: C.hexToNum(log.logIndex)
-            });
+    var seen = {}, payments = [], done = 0;
+    function runJob(job) {
+      return rpc("eth_getLogs", [{
+        address: job.address, topics: [CONFIG.paidTopic],
+        fromBlock: "0x" + job.from.toString(16), toBlock: "0x" + job.to.toString(16)
+      }]).then(function (logs) {
+        logs.forEach(function (log) {
+          var key = job.address + ":" + log.transactionHash + ":" + C.hexToNum(log.logIndex);
+          if (seen[key]) return; seen[key] = true;
+          var dw = C.words(log.data);
+          var amount = C.wordToBigInt(dw[1]);
+          if (amount === 0n) return; // zero-value events are not payments
+          payments.push({
+            v: job.v,
+            orderId: log.topics[1], payer: C.wordToAddress(log.topics[2]),
+            agent: C.wordToAddress(log.topics[3]), payee: C.wordToAddress(dw[0]),
+            amount: amount, txHash: log.transactionHash,
+            block: C.hexToNum(log.blockNumber), logIndex: C.hexToNum(log.logIndex)
           });
         });
+      }).then(function () {
+        done++;
+        if (onProgress) onProgress(done, jobs.length);
       });
-    });
-    return chain.then(function () {
+    }
+    // Concurrency-limited pool: at most SCAN_CONCURRENCY chunk calls in flight.
+    var next = 0;
+    function worker() {
+      if (next >= jobs.length) return Promise.resolve();
+      var job = jobs[next++];
+      return runJob(job).then(worker);
+    }
+    var workers = [];
+    for (var i = 0; i < Math.min(SCAN_CONCURRENCY, jobs.length); i++) workers.push(worker());
+    return Promise.all(workers).then(function () {
       payments.sort(function (a, b) { return a.block - b.block || a.logIndex - b.logIndex; });
       return Promise.all(payments.map(function (p) {
         return blockTimestamp(p.block).then(function (ts) { p.seenAt = ts; return p; });
@@ -321,7 +335,10 @@
   }
 
   function loadReceipts() {
-    return scanPayments().then(function (payments) {
+    $("receipts").innerHTML = "<p>Scanning Paid events…</p>";
+    return scanPayments(function (done, total) {
+      $("receipts").innerHTML = "<p>Scanning Paid events… " + done + " / " + total + " chunks</p>";
+    }).then(function (payments) {
       if (!payments.length) {
         $("receipts").innerHTML = "<p>No payments found yet.</p>"; return;
       }
