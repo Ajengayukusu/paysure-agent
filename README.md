@@ -67,7 +67,10 @@ The demo also has a **“Try it live” write panel**: connect your own Web3 wal
 (EIP-1193, e.g. MetaMask) and the page builds calldata locally for real on-chain
 writes — **register your payee name** in the registry, **create an invoice** as a
 merchant, and **pay an invoice** (enabled only when the connected wallet holds an
-active agent session). The page never holds a key; your wallet signs everything,
+active agent session). It also includes **owner session management**: the contract
+owner's wallet can **grant or revoke agent sessions** (per-tx / daily / per-payee
+caps + expiry) and **set the per-session payee allowlist** from the same panel —
+every other wallet sees those controls disabled. The page never holds a key; your wallet signs everything,
 and every write is pre-flighted with `eth_call` so a contract revert is explained
 in plain words before you sign.
 
