@@ -383,7 +383,8 @@
     ["PayeeNotAllowed(address,address)", "This payee is not on the session's allowlist."],
     ["ERC20InsufficientAllowance(address,uint256,uint256)", "The owner has not approved this contract to spend enough tUSD8 for that payment."],
     ["ERC20InsufficientBalance(address,uint256,uint256)", "The paying account does not hold enough tUSD8."],
-    ["ZeroAddress()", "A zero address was supplied."]
+    ["ZeroAddress()", "A zero address was supplied."],
+    ["OwnableUnauthorizedAccount(address)", "Only the contract owner can manage sessions — the connected wallet is not the owner."]
   ];
   function plainRevert(data) {
     if (typeof data === "string" && data.length >= 10) {
@@ -451,7 +452,13 @@
     var area = $("wallet-area");
     var hasWallet = !!provider();
     var connected = !!state.wallet;
-    var dis = connected ? "" : " disabled";
+        var dis = connected ? "" : " disabled";
+    var isOwner = connected && state.wallet.toLowerCase() === CONFIG.owner.toLowerCase();
+    var smDis = isOwner ? "" : " disabled";
+    var smNote;
+    if (!connected) smNote = '<p class="kv">Connect the owner wallet to use these controls.</p>';
+    else if (!isOwner) smNote = '<p class="kv">Your connected wallet is <b>not</b> the contract owner, so these controls stay disabled.</p>';
+    else smNote = '<p class="kv ok">You are the contract owner — session controls are live.</p>';
     var status;
     if (!hasWallet) {
       status = NO_WALLET_HINT;
@@ -479,10 +486,28 @@
       '<button id="ci-btn" type="button"' + dis + '>Create invoice</button></div>' +
       '<div id="ci-result" class="result"></div>' +
       '<h3 class="sub-h">Pay an invoice (agent session)</h3>' +
-      '<div id="pay-list">' + (connected ? '<p class="loading">Checking your session…</p>' : "") + "</div>";
+      '<div id="pay-list">' + (connected ? '<p class="loading">Checking your session…</p>' : "") + "</div>" +
+      '<h3 class="sub-h">Manage agent sessions (contract owner)</h3>' +
+      '<p class="hint">Only the contract owner (<span class="mono">' + esc(CONFIG.owner) + '</span>) can grant or revoke agent sessions and set each session’s payee allowlist — the same controls that set up the session in section 3. Caps below are in tUSD8: per-transaction · daily · per-payee per day · session length in days.</p>' +
+      smNote +
+      '<div class="row"><input id="sm-agent" type="text" value="' + esc(CONFIG.agent) + '" aria-label="Agent address" class="mono"' + smDis + "></div>" +
+      '<div class="row"><input id="sm-pertx" type="text" inputmode="decimal" value="2" aria-label="Per-transaction cap in tUSD8" class="short"' + smDis + ">" +
+      '<input id="sm-daily" type="text" inputmode="decimal" value="3" aria-label="Daily cap in tUSD8" class="short"' + smDis + ">" +
+      '<input id="sm-perpayee" type="text" inputmode="decimal" value="1.50" aria-label="Per-payee daily cap in tUSD8" class="short"' + smDis + ">" +
+      '<input id="sm-days" type="text" inputmode="numeric" value="14" aria-label="Session length in days" class="short"' + smDis + ">" +
+      '<button id="sm-grant-btn" type="button"' + smDis + ">Grant session</button></div>" +
+      '<div class="row"><input id="sm-payee" type="text" value="' + esc(CONFIG.payee) + '" aria-label="Payee address for the allowlist" class="mono"' + smDis + ">" +
+      '<button id="sm-allow-btn" type="button"' + smDis + ">Allow payee</button>" +
+      '<button id="sm-disallow-btn" type="button"' + smDis + ">Remove payee</button></div>" +
+      '<div class="row"><button id="sm-revoke-btn" type="button"' + smDis + ">Revoke session (kill switch)</button></div>" +
+      '<div id="sm-result" class="result"></div>';
     $("connect-btn").addEventListener("click", connectWallet);
     $("reg-btn").addEventListener("click", onRegister);
     $("ci-btn").addEventListener("click", onCreateInvoice);
+    $("sm-grant-btn").addEventListener("click", onGrantSession);
+    $("sm-allow-btn").addEventListener("click", function () { onSetPayeeAllowed(true); });
+    $("sm-disallow-btn").addEventListener("click", function () { onSetPayeeAllowed(false); });
+    $("sm-revoke-btn").addEventListener("click", onRevokeSession);
     if (!connected) { renderPayPanel(); return; }
     prequest("eth_chainId", []).then(function (id) {
       var ok = parseInt(id, 16) === CONFIG.chainId;
@@ -612,6 +637,83 @@
           .catch(function () { /* reason already rendered */ });
       });
     });
+  }
+
+  // ---- Session management (owner only; controls stay disabled otherwise) ---
+  function smAgentValue(box) {
+    var a = $("sm-agent").value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(a)) {
+      box.innerHTML = '<p class="err">Agent address is not a valid address.</p>';
+      return null;
+    }
+    return a;
+  }
+
+  function smRefresh(agent) {
+    loadAll();
+    if (state.wallet && agent.toLowerCase() === state.wallet.toLowerCase()) checkWalletSession();
+  }
+
+  function onGrantSession() {
+    var box = $("sm-result");
+    var agent = smAgentValue(box); if (!agent) return;
+    var perTx, daily, perPayee;
+    try {
+      perTx = C.parseUnits($("sm-pertx").value, 6);
+      daily = C.parseUnits($("sm-daily").value, 6);
+      perPayee = C.parseUnits($("sm-perpayee").value, 6);
+    } catch (e) { box.innerHTML = '<p class="err">Caps: ' + esc(e.message) + "</p>"; return; }
+    var days = parseInt($("sm-days").value, 10);
+    if (!(days > 0)) { box.innerHTML = '<p class="err">Session length must be a positive number of days.</p>'; return; }
+    if (perTx <= 0n || daily < perTx) {
+      box.innerHTML = '<p class="err">Caps are inconsistent: per-transaction must be above zero and daily at least the per-transaction cap — the contract reverts with InvalidAmount otherwise.</p>';
+      return;
+    }
+    box.innerHTML = '<p class="loading">Preparing the session grant…</p>';
+    blockNumber("latest").then(blockTimestamp).then(function (nowTs) {
+      var expiresAt = BigInt(nowTs) + BigInt(days) * 86400n;
+      var data = C.encodeCall("grantSession(address,uint256,uint256,uint256,uint64)", [
+        { type: "address", value: agent }, { type: "uint256", value: perTx },
+        { type: "uint256", value: daily }, { type: "uint256", value: perPayee },
+        { type: "uint64", value: expiresAt }
+      ]);
+      return walletSend(CONFIG.invoicePay, data, box).then(function () {
+        box.innerHTML += '<p class="kv">Session granted to <span class="mono">' + esc(agent) + "</span> · per-tx " +
+          C.fmtTUSD8(perTx) + " · daily " + C.fmtTUSD8(daily) + " · per-payee " + C.fmtTUSD8(perPayee) +
+          " tUSD8 · expires " + C.fmtTime(expiresAt) + ".</p>";
+        smRefresh(agent);
+      });
+    }).catch(function () { /* reason already rendered */ });
+  }
+
+  function onSetPayeeAllowed(allowed) {
+    var box = $("sm-result");
+    var agent = smAgentValue(box); if (!agent) return;
+    var payee = $("sm-payee").value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(payee)) {
+      box.innerHTML = '<p class="err">Payee address is not a valid address.</p>';
+      return;
+    }
+    var data = C.encodeCall("setPayeeAllowed(address,address,bool)", [
+      { type: "address", value: agent }, { type: "address", value: payee },
+      { type: "bool", value: allowed }
+    ]);
+    walletSend(CONFIG.invoicePay, data, box).then(function () {
+      box.innerHTML += '<p class="kv">Payee <span class="mono">' + esc(payee) + "</span> is now " +
+        (allowed ? "<b>allowed</b>" : "<b>removed</b>") + ' for agent <span class="mono">' + esc(agent) + "</span>.</p>";
+      smRefresh(agent);
+    }).catch(function () { /* reason already rendered */ });
+  }
+
+  function onRevokeSession() {
+    var box = $("sm-result");
+    var agent = smAgentValue(box); if (!agent) return;
+    if (!window.confirm("Revoke the session of " + agent + "? It cannot pay from the next block on.")) return;
+    var data = C.encodeCall("revokeSession(address)", [{ type: "address", value: agent }]);
+    walletSend(CONFIG.invoicePay, data, box).then(function () {
+      box.innerHTML += '<p class="kv">Session of <span class="mono">' + esc(agent) + "</span> revoked — the kill switch is instant.</p>";
+      smRefresh(agent);
+    }).catch(function () { /* reason already rendered */ });
   }
 
   // ---- Boot ------------------------------------------------------------------

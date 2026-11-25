@@ -82,12 +82,13 @@
   function wordFromBigInt(v) { return v.toString(16).padStart(64, "0"); }
   function wordFromAddress(addr) { return "0".repeat(24) + addr.toLowerCase().replace(/^0x/, ""); }
   function encodeCall(sig, args) {
-    // args: array of {type, value}; supports address, bytes32, uint256, uint64, string
+    // args: array of {type, value}; supports address, bytes32, uint256, uint64, string, bool
     var head = "", tail = "", headBytes = args.length * 32;
     args.forEach(function (a) {
       if (a.type === "address") head += wordFromAddress(a.value);
       else if (a.type === "bytes32") head += a.value.toLowerCase().replace(/^0x/, "").padStart(64, "0");
       else if (a.type === "uint256" || a.type === "uint64") head += wordFromBigInt(BigInt(a.value));
+      else if (a.type === "bool") head += wordFromBigInt(a.value ? 1n : 0n);
       else if (a.type === "string") {
         head += wordFromBigInt(BigInt(headBytes + tail.length / 2));
         var b = utf8Bytes(a.value);
